@@ -7,57 +7,94 @@ const messages = JSON.parse(fs.readFileSync(path.resolve(__dirname, './messages.
 const usersOnline = JSON.parse(fs.readFileSync(path.resolve(__dirname, './usersOnline.json')));
 let clientsOnline = [];
 
-
 const wsServ = new WS.Server({ port: port });
 
 wsServ.on('connection', (ws) => {
-    wsServ.clients.forEach(client => {
+    // Обновляем список клиентов
+    wsServ.clients.forEach((client) => {
         if (client.readyState === WS.OPEN) {
             clientsOnline.push(client);
-        } else{
+        } else {
             clientsOnline.splice(client, 1);
-        };
+        }
     });
 
-    
-    clientsOnline.forEach(client => { client.send(JSON.stringify( { 
-        "type": "currentUserList", 
-        "data": {
-            "usersOnline": usersOnline,
-            "messages": messages
-        } 
-    })) });
-
-    ws.on('message', e => {
-        const inputData = JSON.parse(e);
-        if(inputData['type'] === 'initialData') {
-            clientsOnline.forEach(client => { client.send(JSON.stringify( { "type": "initialData", "data": usersOnline })) });
-        }else if(inputData['type'] === 'userEnter') {
-            const currentUser = inputData['data'];
-            if(!usersOnline.includes(currentUser)) {
-                usersOnline.push(currentUser);
-            };
-            fs.writeFileSync(path.resolve(__dirname, './usersOnline.json'), JSON.stringify(usersOnline));
-        } else if(inputData['type'] === 'chatReq') {
-            clientsOnline.forEach(client => { client.send(JSON.stringify( { "type": "chatReq", "data": { "usersOnline": usersOnline, "messages": messages } })) });
-        } else if(inputData['type'] === 'userOut') {
-            const userOut = inputData['data'];
-            usersOnline.forEach((el) => {
-                if (el === userOut) {
-                    usersOnline.splice(usersOnline.indexOf(el), 1);
-                }
-              });
-            fs.writeFileSync(path.resolve(__dirname, './usersOnline.json'), JSON.stringify(usersOnline));
-        } else if(inputData['type'] === 'newMsg') {
-            messages.forEach(e => {
-                if(e['id'] === inputData['data']['id']){
-                    return;
-                };
+    // Отправляем текущие данные всем клиентам
+    clientsOnline.forEach((client) => {
+        client.send(
+            JSON.stringify({
+                type: 'currentUserList',
+                data: {
+                    usersOnline: usersOnline,
+                    messages: messages,
+                },
             })
-            messages.push(inputData['data']);
-            fs.writeFileSync(path.resolve(__dirname, './messages.json'), JSON.stringify(messages));
-        }  else {
-            throw Error('incorrect type of data')
-        };
+        );
     });
+
+    // Обработка входящих сообщений
+    ws.on('message', (e) => {
+        const inputData = JSON.parse(e);
+
+        switch (inputData['type']) {
+            case 'initialData':
+                handleInitialData();
+                break;
+            case 'userEnter':
+                handleUserEnter(inputData['data']);
+                break;
+            case 'chatReq':
+                handleChatRequest();
+                break;
+            case 'userOut':
+                handleUserOut(inputData['data']);
+                break;
+            case 'newMsg':
+                handleNewMessage(inputData['data']);
+                break;
+            default:
+                throw new Error('Incorrect type of data');
+        }
+    });
+
+    // Обработчики
+    function handleInitialData() {
+        clientsOnline.forEach((client) => {
+            client.send(JSON.stringify({ type: 'initialData', data: usersOnline }));
+        });
+    }
+
+    function handleUserEnter(currentUser) {
+        if (!usersOnline.includes(currentUser)) {
+            usersOnline.push(currentUser);
+            fs.writeFileSync(path.resolve(__dirname, './usersOnline.json'), JSON.stringify(usersOnline));
+        }
+    }
+
+    function handleChatRequest() {
+        clientsOnline.forEach((client) => {
+            client.send(
+                JSON.stringify({
+                    type: 'chatReq',
+                    data: { usersOnline, messages },
+                })
+            );
+        });
+    }
+
+    function handleUserOut(userOut) {
+        const index = usersOnline.indexOf(userOut);
+        if (index !== -1) {
+            usersOnline.splice(index, 1);
+            fs.writeFileSync(path.resolve(__dirname, './usersOnline.json'), JSON.stringify(usersOnline));
+        }
+    }
+
+    function handleNewMessage(newMessage) {
+        const messageExists = messages.some((msg) => msg['id'] === newMessage['id']);
+        if (!messageExists) {
+            messages.push(newMessage);
+            fs.writeFileSync(path.resolve(__dirname, './messages.json'), JSON.stringify(messages));
+        }
+    }
 });
